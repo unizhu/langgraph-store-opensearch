@@ -1,0 +1,7 @@
+{
+  "include": ["src", "tests"],
+  "exclude": ["examples"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11"
+}

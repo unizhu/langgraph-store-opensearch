@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdf
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.vscode/
+.ruff_cache/
+.venv/
+.env
+uv.lock
+.DS_Store
