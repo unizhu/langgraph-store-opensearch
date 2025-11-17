@@ -2,11 +2,19 @@
 
 LangGraph-compatible `BaseStore` that persists agent long-term memory inside OpenSearch 3.x.
 Configuration uses `pydantic-settings`, so environment variables are validated as soon as the
-package imports. See `AGENTS.md`, `docs/RESEARCH.md`, and `docs/CODE_EXAMPLES.md` for the high-level
-architecture, `docs/OPS_GUIDE.md` for migrations/operations, and `docs/CONTRACT_TESTS.md` for parity
+package imports. See [docs/CODE_EXAMPLES.md](docs/CODE_EXAMPLES.md) for the high-level
+architecture, [docs/OPS_GUIDE.md](docs/OPS_GUIDE.md) for migrations/operations, and [docs/CONTRACT_TESTS.md](docs/CONTRACT_TESTS.md) for parity
 testing instructions.
 
-## Prerequisites
+## TL;DR
+
+```bash
+uv pip install langgraph-opensearch-store
+```
+
+or just use pip: `pip install langgraph-opensearch-store`
+
+## Development Prerequisites
 
 - [uv](https://github.com/astral-sh/uv) ≥ 0.6
 - Python 3.11+ (uv can install/manage it automatically)
@@ -97,16 +105,25 @@ store.get_stats()  # => {"total_items": ..., "namespace_count": ...}
 
 - `search_mode`: `auto` (default), `text`, `vector`, or `hybrid`. Auto uses hybrid when embeddings + query
   are available. Configure via `.env` (`OPENSEARCH_SEARCH_MODE`) or `OpenSearchStore.from_params(...)`.
-- `search_num_candidates`/`search_similarity_threshold` tune Lucene kNN behavior.
+- `search_num_candidates` influences Lucene kNN recall; the store now maps this value to
+  `method_parameters.ef_search` so OpenSearch 3.x queries stay valid while still letting you widen the
+  candidate pool. `search_similarity_threshold` remains available for score cutoffs.
+- Namespace + metadata filters are injected directly into the kNN clause, so Lucene/Faiss can short-circuit
+  on filtered subsets without a post-filter penalty.
 - TTL support is enabled by default when you pass `ttl` to `store.put(...)` or set
   `OPENSEARCH_TTL_MINUTES_DEFAULT`. Expired docs are filtered automatically during `get/search`, and
   the helper `store.ttl_manager.run_once()` deletes all expired docs via delete-by-query.
 
 ```python
-store = OpenSearchStore.from_params(hosts="http://localhost:9200", search_mode="hybrid", ttl_minutes_default=1440)
+store = OpenSearchStore.from_params(
+    hosts="http://localhost:9200",
+    search_mode="hybrid",
+    search_num_candidates=400,   # mapped to ef_search under the hood
+    ttl_minutes_default=1440,
+)
 store.setup()
 store.put(("prefs",), "favorite_color", {"text": "blue"}, ttl=60)
-store.search(("prefs",), query="blue", limit=3)
+store.search(("prefs",), query="blue", limit=3, metadata_filter={"source": "profile"})
 store.ttl_manager.run_once()
 ```
 

@@ -10,7 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from langgraph_opensearch_store import OpenSearchStore, Settings
 
-settings = Settings(index_prefix="agent_mem")
+settings = Settings(index_prefix="agent_mem", search_num_candidates=512)
 store = OpenSearchStore.from_settings(
     settings=settings,
     embeddings=OpenAIEmbeddings(model="text-embedding-3-small"),

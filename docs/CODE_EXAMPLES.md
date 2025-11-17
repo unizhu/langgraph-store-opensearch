@@ -8,33 +8,27 @@ All snippets mirror the LangGraph add-memory guide (MemorySaver + `store` interf
 
 ```python
 # examples/basic_usage.py
-from opensearchpy import OpenSearch
 from langchain_openai import OpenAIEmbeddings
-from langgraph_opensearch_store import OpenSearchStore
-from langgraph_opensearch_store.config import Settings
+from langgraph_opensearch_store import OpenSearchStore, Settings
 
 settings = Settings(
-    deployment="local",
     hosts=["http://localhost:9200"],
-    username="admin",
-    password="admin",
-    index_prefix="langgraph",
-    embedding_dim=1536,
+    search_mode="hybrid",
+    search_num_candidates=400,
 )
-
 store = OpenSearchStore.from_settings(
     settings=settings,
     embeddings=OpenAIEmbeddings(model="text-embedding-3-small"),
 )
-store.setup(client=OpenSearch(hosts=settings.hosts, http_auth=(settings.username, settings.password)))
+store.setup()
 
 namespace = ("prefs", "user_123")
-store.put(namespace, "coding_style", {"lang": "python", "paradigm": "functional"})
-item = store.get(namespace, "coding_style")
-print("GET ▶", item.value)
+store.put(namespace, "coding_style", {"text": "I enjoy typed Python", "source": "profile"})
+store.put(namespace, "favorite_stack", {"text": "Async FastAPI", "source": "profile"})
 
-results = store.search(namespace, query="programming paradigm", limit=3)
-print("SEARCH ▶", [r.value for r in results])
+print("GET ▶", store.get(namespace, "coding_style").value)
+matches = store.search(namespace, query="typed", limit=2, metadata_filter={"source": "profile"})
+print("SEARCH ▶", [m.value for m in matches])
 ```
 
 ***
@@ -49,7 +43,12 @@ from langgraph_opensearch_store import OpenSearchStore
 from langgraph_opensearch_store.config import Settings
 
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-settings = Settings(hosts=["http://localhost:9200"], index_prefix="semantic_mem", embedding_dim=1536)
+settings = Settings(
+    hosts=["http://localhost:9200"],
+    index_prefix="semantic_mem",
+    search_mode="vector",
+    search_num_candidates=256,
+)
 
 store = OpenSearchStore.from_settings(settings=settings, embeddings=embeddings)
 
@@ -78,7 +77,7 @@ from langgraph_opensearch_store import OpenSearchStore
 from langgraph_opensearch_store.config import Settings
 
 # --- OpenSearch store --------------------------------------------------------
-settings = Settings(hosts=["http://localhost:9200"], index_prefix="agent_mem")
+settings = Settings(hosts=["http://localhost:9200"], index_prefix="agent_mem", search_num_candidates=512)
 store = OpenSearchStore.from_settings(
     settings=settings,
     embeddings=OpenAIEmbeddings(model="text-embedding-3-small"),
@@ -131,16 +130,17 @@ print(answer["messages"][-1].content)           # ➜  Your name is Alice.
 ```python
 # examples/aws_deployment.py
 from langchain_openai import OpenAIEmbeddings
-from langgraph_opensearch_store import OpenSearchStore
+from langgraph_opensearch_store import OpenSearchStore, Settings
 
-store = OpenSearchStore.from_aws(
-    opensearch_url="https://search-domain.us-east-1.es.amazonaws.com",
-    region="us-east-1",
-    service="es",
-    embedding=OpenAIEmbeddings(model="text-embedding-3-small"),
-    index_name="prod_agent_memory",
-    engine="lucene",
+settings = Settings(
+    deployment="aws",
+    hosts=["https://search-domain.us-east-1.es.amazonaws.com"],
+    auth_mode="sigv4",
+    aws_region="us-east-1",
+    search_mode="hybrid",
+    search_num_candidates=512,
 )
+store = OpenSearchStore.from_settings(settings=settings, embeddings=OpenAIEmbeddings(model="text-embedding-3-small"))
 store.setup()
 ```
 

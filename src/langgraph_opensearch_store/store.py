@@ -422,20 +422,15 @@ class OpenSearchStore(BaseStore):
             return self._text_search(query, filters, limit, offset)
         vector = self._embeddings.embed_query(query)
         size = limit + offset
-        knn_clause = {
-            "field": "embedding",
-            "query_vector": vector,
+        knn_payload = {
+            "vector": vector,
             "k": size,
             "num_candidates": max(size * 2, self.settings.search_num_candidates),
-            "filter": {"bool": {"filter": filters}},
         }
         if self.settings.search_similarity_threshold is not None:
-            knn_clause["similarity_cutoff"] = self.settings.search_similarity_threshold
-        body = {
-            "size": size,
-            "query": {"match_all": {}},
-            "knn": knn_clause,
-        }
+            knn_payload["similarity_cutoff"] = self.settings.search_similarity_threshold
+        body = {"size": size}
+        self._apply_knn_query(body, knn_payload, filters)
         resp = self.client.search(index=self.settings.data_index_alias, body=body)
         hits = resp.get("hits", {}).get("hits", [])
         return hits[offset:offset + limit]
@@ -516,13 +511,74 @@ class OpenSearchStore(BaseStore):
         }
         if self._embeddings is not None:
             vector = self._embeddings.embed_query(query)
-            body["knn"] = {
-                "field": "embedding",
-                "query_vector": vector,
-                "k": limit,
-                "num_candidates": max(limit * 4, 20),
-            }
+            self._apply_knn_query(
+                body,
+                {
+                    "vector": vector,
+                    "k": limit,
+                    "num_candidates": max(limit * 4, 20),
+                },
+                [],
+            )
         return body
+
+    def _apply_knn_query(
+        self,
+        body: dict[str, Any],
+        payload: dict[str, Any],
+        filters: list[dict[str, Any]],
+    ) -> None:
+        clause = self._format_knn_clause(payload)
+        if filters:
+            self._merge_knn_filters(clause[self._embedding_field], filters)
+        body["query"] = {"knn": clause}
+
+    def _format_knn_clause(self, payload: dict[str, Any]) -> dict[str, Any]:
+        field_name = self._embedding_field
+        modern = dict(payload)
+        num_candidates = modern.pop("num_candidates", None)
+        if num_candidates is not None:
+            method_params = modern.setdefault("method_parameters", {})
+            if "ef_search" not in method_params:
+                ef_search = self._calculate_ef_search(modern, num_candidates)
+                if ef_search is not None:
+                    method_params["ef_search"] = ef_search
+        return {field_name: modern}
+
+    def _calculate_ef_search(self, payload: dict[str, Any], num_candidates: Any) -> int | None:
+        try:
+            ef_search = int(num_candidates)
+            if ef_search <= 0:
+                return None
+            k_value = payload.get("k")
+            if k_value is not None:
+                k_int = max(int(k_value), 1)
+                ef_search = max(ef_search, k_int)
+            return ef_search
+        except Exception:
+            return None
+
+    def _merge_knn_filters(self, clause: dict[str, Any], filters: list[dict[str, Any]]) -> None:
+        existing = clause.get("filter")
+        additional = {"bool": {"filter": filters}}
+        if not existing:
+            clause["filter"] = additional
+            return
+        if isinstance(existing, dict) and "bool" in existing:
+            bool_section = existing.setdefault("bool", {})
+            current_filters = bool_section.setdefault("filter", [])
+            if isinstance(current_filters, list):
+                current_filters.extend(filters)
+                return
+        clause["filter"] = {
+            "bool": {
+                "filter": [existing, additional],
+            }
+        }
+
+    @property
+    def _embedding_field(self) -> str:
+        return "embedding"
 
     def _handle_list_namespaces(self, op: ListNamespacesOp) -> list[tuple[str, ...]]:
         prefix_path = _extract_condition(op.match_conditions, "prefix")

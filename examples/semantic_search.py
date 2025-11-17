@@ -5,7 +5,11 @@ from langchain_openai import OpenAIEmbeddings
 from langgraph_opensearch_store import OpenSearchStore, Settings
 
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-settings = Settings(index_prefix="semantic_mem")
+settings = Settings(
+    index_prefix="semantic_mem",
+    search_mode="vector",
+    search_num_candidates=256,
+)
 store = OpenSearchStore.from_settings(settings=settings, embeddings=embeddings)
 store.setup()
 

@@ -176,3 +176,52 @@ def test_delete_snapshot_calls_client(store: OpenSearchStore):
     store.client.snapshot.delete.return_value = {"acknowledged": True}
     store.delete_snapshot(repository="repo", snapshot="snap")
     store.client.snapshot.delete.assert_called_with(repository="repo", snapshot="snap")
+
+
+def _extract_knn_clause(store: OpenSearchStore, body: dict[str, object]) -> dict[str, object]:
+    query = body.get("query")
+    assert isinstance(query, dict)
+    knn = query.get("knn")
+    assert isinstance(knn, dict)
+    clause = knn.get(store._embedding_field)
+    assert isinstance(clause, dict)
+    return clause
+
+
+def test_apply_knn_query_builds_expected_structure(store: OpenSearchStore):
+    body: dict[str, object] = {}
+    vector = [0.5] * store.settings.embedding_dim
+    store._apply_knn_query(body, {"vector": vector, "k": 3, "num_candidates": 9}, [])
+    clause = _extract_knn_clause(store, body)
+    assert clause["vector"] == vector
+    assert clause["k"] == 3
+    method_params = clause.get("method_parameters")
+    assert isinstance(method_params, dict)
+    assert method_params.get("ef_search") == 9
+
+
+def test_apply_knn_query_embeds_filters_inline(store: OpenSearchStore):
+    body: dict[str, object] = {}
+    filters = [{"term": {"namespace_key": "prefs::user"}}]
+    vector = [0.1] * store.settings.embedding_dim
+    store._apply_knn_query(body, {"vector": vector, "k": 1}, list(filters))
+    clause = _extract_knn_clause(store, body)
+    filter_clause = clause.get("filter")
+    assert isinstance(filter_clause, dict)
+    assert "bool" in filter_clause
+    bool_block = filter_clause["bool"]
+    assert isinstance(bool_block, dict)
+    assigned = bool_block.get("filter")
+    assert isinstance(assigned, list)
+    assert filters[0] in assigned
+
+
+def test_knn_clause_converts_num_candidates_to_method_params(store: OpenSearchStore):
+    body: dict[str, object] = {}
+    vector = [0.2] * store.settings.embedding_dim
+    store._apply_knn_query(body, {"vector": vector, "k": 2, "num_candidates": 1}, [])
+    clause = _extract_knn_clause(store, body)
+    assert "num_candidates" not in clause
+    method_params = clause.get("method_parameters")
+    assert isinstance(method_params, dict)
+    assert method_params.get("ef_search") == 2  # max(k, num_candidates)
